@@ -1,0 +1,23 @@
+First of all, connect the DHT22 with ESP32.
+The connections for the DHT22 with ESP32 are as follows:
+
+-Pin 1 of DHT22 which is the VCC pin to 3.3V of ESP32
+-Pin 2 of DHT22 which is the data pin to D15 of ESP32
+-Pin 4 of DHT22 which is the GND pin to GND of ESP32
+-----------------------------------------------------------------------------------------
+
+Then connect the BMP280 pressure sensor to the ESP32. The connections are as follows:
+
+Vin of BMP180 to 3.3V of ESP32
+GND of BMP180 to GND of ESP32
+SCL of BMP180 to pin 22 of ESP32 (Pin 22 of ESP32 is the SCL pin)
+SDA of BMP180 to pin 21 of ESP32 (Pin 21 of ESP32 is the SDA pin)
+-------------------------------------------------------------------------------------------------
+then connect the sd card module to the ESP32. The connections are as follows:
+
+GND of  SdCardModule to GND of ESP32
+VCC of  SdCardModule to VIN of ESP32
+MISO of  SdCardModule to pin G19 of ESP32
+MOSI of  SdCardModule to pin G23 of ESP32
+SCK of  SdCardModule to pin G18 of ESP32
+CS of  SdCardModule to Pin G5 of ESP32

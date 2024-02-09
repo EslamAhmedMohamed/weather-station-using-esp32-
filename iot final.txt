@@ -1,0 +1,235 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP085.h>  // Commented out BMP085 library
+#include <DHT.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPI.h>
+#include <SD.h>
+#include <ESP32_MailClient.h>
+
+#define DHTPIN 15  // DHT11 data pin connected to D15
+#define DHTTYPE DHT11
+
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_BMP085 bmp;  // Commented out BMP sensor initialization
+WebServer server(80);
+#define chipSelect 5
+//const int chipSelect = 5; // Chip select pin for SD card module
+
+// Email settings
+const char *smtpServer = "smtp.gmail.com";
+const int smtpServerPort = 465;
+const char *emailSenderAddress = "esp32dht11bmp180@gmail.com";
+const char *emailSenderPassword = "uzfpzefxauijjsvg";
+const char *emailRecipientAddress = "ea0750187@gmail.com";
+
+float userTemperatureThreshold = 24;
+float userHumidityThreshold = 75;
+float userPressureThreshold = 500000000000000;
+float userAltitudeThreshold = 5000;
+// Flags to track if an alert email has been sent
+bool tempAlertSent = false;
+bool humiAlertSent = false;
+bool pressAlertSent = false;
+bool altiAlertSent = false;
+
+
+
+void checkThresholds(float temperature, float humidity, float pressure, float altitude);
+void sendAlertEmail(const char *subject, const char *content);
+
+// Add the following code outside any function to define a global variable
+String sensorData;
+
+void handleSensorData() {
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+  float pressure = bmp.readPressure();
+  float altitude = bmp.readAltitude();
+
+  // Create a JSON string with the sensor data
+  sensorData = "{\"temperature\":" + String(temperature) +
+               ",\"humidity\":" + String(humidity) +
+               ",\"pressure\":" + String(pressure) +
+               ",\"altitude\":" + String(altitude) + "}";
+  
+  server.send(200, "application/json", sensorData);
+}
+
+void setup() {
+  Serial.begin(115200);
+  server.on("/sensor-data", HTTP_GET, handleSensorData);
+  server.on("/thresholds", HTTP_POST, handleThresholds);
+
+
+  if (!bmp.begin()) {
+    Serial.println("Could not find BMP180 or BMP085 sensor.");
+    while (1) {
+      delay(1000);
+    }
+  }
+
+  dht.begin();
+
+  // Connect to Wi-Fi
+  WiFi.begin("ahmed108", "ahmed100200#");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+    return;
+  }
+  Serial.println("Card initialized.");
+  // Define HTTP routes
+  server.on("/", HTTP_GET, handleRoot);
+  // Start the server
+  server.begin();
+  Serial.println("Server started");
+
+  // Print the ESP32 local IP address
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  server.handleClient();
+  
+}
+
+ void handleRoot() {
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+  float pressure = bmp.readPressure();
+  float altitude = bmp.readAltitude();
+  
+ 
+ String html = "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Weather Station</title><style>.sensor-data {text-align: center; margin: 0 auto; max-width: 600px;}.temperature-symbol::before { content: '🌡️';}.humidity-symbol::before { content: '💧';}.pressure-symbol::before { content: '📊';}.altitude-symbol::before { content: '🗻';}</style><script>function updateReadings() { var xhttp = new XMLHttpRequest(); xhttp.onreadystatechange = function() { if (this.readyState == 4 && this.status == 200) { var data = JSON.parse(this.responseText); document.getElementById('temperature').innerHTML = data.temperature.toFixed(1); document.getElementById('humidity').innerHTML = data.humidity.toFixed(1); document.getElementById('pressure').innerHTML = data.pressure.toFixed(1); document.getElementById('altitude').innerHTML = data.altitude.toFixed(1); } }; xhttp.open('GET', '/sensor-data', true); xhttp.send(); } setInterval(updateReadings, 1000);</script></head><body><div class='sensor-data'><h1>Weather Station</h1><p><span class='temperature-symbol'></span> Temperature: <span id='temperature'>" + String(temperature) + "</span> &deg;C</p><p><span class='humidity-symbol'></span> Humidity: <span id='humidity'>" + String(humidity) + "</span> %</p><p><span class='pressure-symbol'></span> Pressure: <span id='pressure'>" + String(pressure) + "</span> hPa</p><p><span class='altitude-symbol'></span> Altitude: <span id='altitude'>" + String(altitude) + "</span> meters</p><form method='POST' action='/thresholds'><label for='temperature-threshold'>Temperature Threshold:</label><input type='number' step='0.1' id='temperature-threshold' name='temperature' value='" + String(userTemperatureThreshold) + "'><br><label for='humidity-threshold'>Humidity Threshold:</label><input type='number' step='1' id='humidity-threshold' name='humidity' value='" + String(userHumidityThreshold) + "'><br><label for='pressure-threshold'>Pressure Threshold:</label><input type='number' step='0.1' id='pressure-threshold' name='pressure' value='" + String(userPressureThreshold) + "'><br><label for='altitude-threshold'>Altitude Threshold:</label><input type='number' step='1' id='altitude-threshold' name='altitude' value='" + String(userAltitudeThreshold) + "'><br><input type='submit' value='Submit'></form></div></body></html>";
+  saveReadingsToFile(temperature, humidity, pressure, altitude);
+  checkThresholds(temperature, humidity, pressure, altitude);
+  
+  server.send(200, "text/html", html);
+  delay(1000);
+}
+
+
+void checkThresholds(float temperature, float humidity, float pressure, float altitude) {
+  // Temperature
+  if (temperature > userTemperatureThreshold && !tempAlertSent) {
+    String temperatureAlert = "Temperature above threshold: " + String(temperature);
+    sendAlertEmail("[ALERT] Weather Station", temperatureAlert.c_str());
+    tempAlertSent = true;
+  } else if (temperature <= userTemperatureThreshold && tempAlertSent) {
+    tempAlertSent = false;
+    String temperatureAlert = "Temperature below threshold: " + String(temperature);
+    sendAlertEmail("[ALERT] Weather Station", temperatureAlert.c_str());
+  }
+
+  // Humidity
+  if (humidity > userHumidityThreshold && !humiAlertSent) {
+    String humidityAlert = "Humidity above threshold: " + String(humidity);
+    sendAlertEmail("[ALERT] Weather Station", humidityAlert.c_str());
+    humiAlertSent = true;
+  } else if (humidity <= userHumidityThreshold && humiAlertSent) {
+     String humidityAlert = "Humidity below threshold: " + String(humidity);
+    sendAlertEmail("[ALERT] Weather Station", humidityAlert.c_str());
+    humiAlertSent = false;
+  } 
+  
+
+  // Pressure
+ if (pressure > userPressureThreshold && !pressAlertSent) {
+  String pressureAlert = "Pressure above threshold: " + String(pressure);
+  sendAlertEmail("[ALERT] Weather Station", pressureAlert.c_str());
+  pressAlertSent = true;
+} else if (pressure <= userPressureThreshold && pressAlertSent) {
+  String pressureAlert = "Pressure below threshold: " + String(pressure);
+  sendAlertEmail("[ALERT] Weather Station", pressureAlert.c_str());
+  pressAlertSent = false;
+}
+
+
+  // Altitude
+ if (altitude > userAltitudeThreshold && !altiAlertSent) {
+  String altitudeAlert = "Altitude above threshold: " + String(altitude);
+  sendAlertEmail("[ALERT] Weather Station", altitudeAlert.c_str());
+  altiAlertSent = true;
+} else if (altitude <= userAltitudeThreshold && altiAlertSent) {
+  String altitudeAlert = "Altitude below threshold: " + String(altitude);
+  sendAlertEmail("[ALERT] Weather Station", altitudeAlert.c_str());
+  altiAlertSent = false;
+}
+
+}
+void sendAlertEmail(const char *subject, const char *content) {
+  // Create the ESP32_MailClient object
+  SMTPData smtpData;
+
+  // Set the email server and credentials
+  smtpData.setLogin(smtpServer, smtpServerPort, emailSenderAddress, emailSenderPassword);
+  smtpData.setSender("ESP32", emailSenderAddress);
+
+  // Set Email priority or importance High, Normal, Low, or 1 to 5 (1 is the highest)
+  smtpData.setPriority("High");
+
+  // Set the subject
+  smtpData.setSubject(subject);
+
+  // Set the message with HTML format
+  smtpData.setMessage(content, true);
+
+  // Add recipients
+  smtpData.addRecipient(emailRecipientAddress);
+
+  // Start sending Email, can be set callback function to track the status
+  if (!MailClient.sendMail(smtpData)) {
+    Serial.println("Error sending Email, " + MailClient.smtpErrorReason());
+  } else {
+    Serial.println("Email sent successfully");
+  }
+  // Clear all data from Email object to free memory
+  smtpData.empty();
+}
+void saveReadingsToFile(float temperature, float humidity, float pressure, float altitude) {
+  // Open the file in write mode
+  File dataFile = SD.open("/weather_data.txt", FILE_APPEND);
+
+  // If the file is available, write to it
+  if (dataFile) {
+    dataFile.print("Temperature: ");
+    dataFile.print(temperature);
+    dataFile.print(" °C, Humidity: ");
+    dataFile.print(humidity);
+    dataFile.print(" %, Pressure: ");
+    dataFile.print(pressure);
+    dataFile.print(" hPa, Altitude: ");
+    dataFile.print(altitude);
+    dataFile.println(" meters");
+
+    // Close the file
+    dataFile.close();
+    Serial.println("Data saved to SD card.");
+  } else {
+    // If the file isn't open, print an error
+    Serial.println("Error opening data file.");
+  }
+}
+void handleThresholds() {
+  if (server.hasArg("temperature")) {
+    userTemperatureThreshold = server.arg("temperature").toFloat();
+  }
+  if (server.hasArg("humidity")) {
+    userHumidityThreshold = server.arg("humidity").toFloat();
+  }
+  if (server.hasArg("pressure")) {
+    userPressureThreshold = server.arg("pressure").toFloat();
+  }
+  if (server.hasArg("altitude")) {
+    userAltitudeThreshold = server.arg("altitude").toFloat();
+  }
+
+  server.send(200, "text/plain", "Thresholds updated.");
+}
