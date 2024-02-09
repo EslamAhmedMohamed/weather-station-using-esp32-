@@ -20,9 +20,9 @@ WebServer server(80);
 // Email settings
 const char *smtpServer = "smtp.gmail.com";
 const int smtpServerPort = 465;
-const char *emailSenderAddress = "esp32dht11bmp180@gmail.com";
-const char *emailSenderPassword = "uzfpzefxauijjsvg";
-const char *emailRecipientAddress = "ea0750187@gmail.com";
+const char *emailSenderAddress = "ESP Email";
+const char *emailSenderPassword = "Esp password";
+const char *emailRecipientAddress = "your email";
 
 float userTemperatureThreshold = 24;
 float userHumidityThreshold = 75;
